@@ -1,7 +1,7 @@
 walkoff_version: 1.0.0 # Standard bir Shuffle uygulaması için
 app_version: 1.0.0     # Uygulamanızın mevcut versiyonu
 name: wazuh_opencti_enricher
-environment: onprem    # Varsayılan ortam tipi
+environment: Shuffle    # Varsayılan ortam tipi
 description: Enrich Wazuh alerts with OpenCTI information
 author: Elshan
 tags:
