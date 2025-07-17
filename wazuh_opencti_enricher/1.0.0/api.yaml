@@ -3,7 +3,8 @@ app_version: 1.0.0     # Uygulamanızın mevcut versiyonu
 name: wazuh_opencti_enricher
 environment: Shuffle    # Varsayılan ortam tipi
 description: Enrich Wazuh alerts with OpenCTI information
-author: Elshan
+docker_image: nailamacidova/wazuh_opencti_enricher:latest
+author: Naila
 tags:
   - wazuh
   - opencti
