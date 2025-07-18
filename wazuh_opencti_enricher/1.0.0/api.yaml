@@ -1,8 +1,8 @@
-walkoff_version: 1.0.0 # Standard bir Shuffle uygulaması için
-app_version: 1.0.0     # Uygulamanızın mevcut versiyonu
-name: Enricher_Wazuh_to_OpenCTI
-environment: Shuffle    # Varsayılan ortam tipi
-description: Enrich Wazuh alerts with OpenCTI information
+walkoff_version: 1.0.0
+app_version: 1.0.1
+name: Enricher_Wazuh_to_OpenCTI_V2
+environment: Shuffle
+description: Enrich Wazuh alerts with OpenCTI information (v2)
 docker_image: nailamacidova/wazuh_opencti_enricher:latest
 author: Naila
 tags:
@@ -10,36 +10,36 @@ tags:
   - opencti
   - enrichment
   - threat-intelligence
-categories:            # Kategoriler ekleyebiliriz
+categories:
   - Security
   - SOAR
-contact_info:          # İletişim bilgileri ekleyebiliriz
-  name: "Your Name/Organization"
-  url: "https://github.com/YourGitHubUser/your-github-repo-name"
+contact_info:
+  name: "Naila Macidova"
+  url: "https://github.com/naile03/Wazuh_OpenCTI_Enricher"
 authentication:
-  required: true # Kimlik doğrulama gereksinimi
+  required: true
   parameters:
     - name: opencti_url
       description: URL of the OpenCTI instance
-      example: "https://your-opencti.com" # Örnek değer
+      example: "http://10.34.34.35:8080"
       required: true
-      schema: # Şema tanımı
+      schema:
         type: string
     - name: opencti_token
       description: OpenCTI API Token
-      example: "your_opencti_api_token" # Örnek değer
+      example: "2cb33cf4-b893-4931-a2fb-5aae963872c9"
       required: true
-      schema: # Şema tanımı
+      schema:
         type: string
 actions:
   - name: enrich_alert_with_opencti
     description: Enriches a Wazuh alert with data from OpenCTI.
-    parameters: # input_fields yerine parameters kullanıyoruz ve schema ekliyoruz
+    parameters:
       - name: wazuh_alert_json
         description: The Wazuh alert in JSON format.
         required: true
-        schema: # Şema tanımı
-          type: string # JSON string olarak bekleniyor
-    returns: # Çıkış tanımı
+        schema:
+          type: string
+    returns:
       schema:
-        type: json # JSON objesi olarak dönecek
+        type: json
