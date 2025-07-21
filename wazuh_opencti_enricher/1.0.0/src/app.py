@@ -51,6 +51,9 @@ class WazuhOpenCTIEnricherApp(AppBase):
         if self.opencti_api_client:
             return self.opencti_api_client
 
+        if not api_url or not api_token:
+            raise ValueError("OpenCTI URL and Token cannot be empty.")
+
         try:
             # OpenCTIApiClient'a ssl_verify=False parametresini ekliyoruz
             self.opencti_api_client = OpenCTIApiClient(api_url, api_token, ssl_verify=False)
@@ -82,7 +85,7 @@ class WazuhOpenCTIEnricherApp(AppBase):
             search_key = "hashes.MD5"
         else:
             self.logger.error(f"Unsupported observable type for search: {observable_type}")
-            return None
+            return {"observable": observable_value, "type": observable_type, "status": "unsupported_type", "error": f"Unsupported observable type: {observable_type}"}
 
         try:
             observable = self.opencti_api_client.stix_cyber_observable.read(
@@ -119,14 +122,14 @@ class WazuhOpenCTIEnricherApp(AppBase):
                 return enriched_data
             else:
                 self.logger.info(f"No existing {observable_type} observable found for value: '{observable_value}' in OpenCTI.")
-                return None
+                return {"observable": observable_value, "type": observable_type, "status": "not_found"}
 
         except (OpenCTIConnectionError, OpenCTIAuthenticationError, OpenCTIAPIException) as e:
             self.logger.error(f"OpenCTI arama hatası for '{observable_value}': {e}", exc_info=True)
-            return {"error": f"OpenCTI arama hatası: {e}"} # Hata objesi döndür
+            return {"observable": observable_value, "type": observable_type, "status": "failed", "error": f"OpenCTI arama hatası: {e}"}
         except Exception as e:
             self.logger.error(f"Beklenmedik bir hata oluştu OpenCTI araması sırasında for '{observable_value}': {e}", exc_info=True)
-            return {"error": f"Beklenmedik hata: {e}"} # Hata objesi döndür
+            return {"observable": observable_value, "type": observable_type, "status": "failed", "error": f"Beklenmedik hata: {e}"}
 
     # --- Yardımcı Fonksiyon: Wazuh Alert'ten Göstergeleri Çıkarma ---
     def _extract_indicators_from_wazuh_alert(self, alert_content):
@@ -135,6 +138,11 @@ class WazuhOpenCTIEnricherApp(AppBase):
             "file_names": [],
             "md5_hashes": []
         }
+
+        # Əgər alert_content boş və ya düzgün formatda deyilsə, boş göstəricilər qaytar
+        if not alert_content or not isinstance(alert_content, dict):
+            self.logger.warning("Wazuh alert content is empty or not a dictionary. No indicators to extract.")
+            return indicators
 
         base_data = alert_content.get('all_fields', alert_content)
 
@@ -187,27 +195,44 @@ class WazuhOpenCTIEnricherApp(AppBase):
         return indicators
 
     # --- ANA EYLEM FONKSİYONU (api.yaml'da tanımlı) ---
-    def enrich_alert_with_opencti(self, opencti_url, opencti_token, wazuh_alert_json):
+    def enrich_alert_with_opencti(self, opencti_url, opencti_token, wazuh_alert_json="{}"):
         """
         Shuffle'dan çağrılan ana eylem fonksiyonu.
         Wazuh alarmını OpenCTI ile zenginleştirir.
+        :param opencti_url: OpenCTI API URL'si.
+        :param opencti_token: OpenCTI API tokenı.
+        :param wazuh_alert_json: Wazuh alertinin JSON stringi. Varsayılan olaraq boş bir JSON obyektidir.
         """
         self.logger.info("Starting OpenCTI Enrichment Script for Wazuh Alerts")
-        self.logger.info("Parsing Wazuh alert JSON...")
+        
+        # OpenCTI URL və Token-in boş olub-olmadığını yoxlayın
+        if not opencti_url or not opencti_token:
+            error_msg = "OpenCTI URL and Token must be provided. Please check your Shuffle workflow configuration."
+            self.logger.critical(error_msg)
+            return json.dumps({"status": "failed", "error": error_msg, "original_alert": wazuh_alert_json})
 
+        self.logger.info("Parsing Wazuh alert JSON...")
+        
+        wazuh_alert = {}
         try:
             # wazuh_alert_json Shuffle'dan bir string olarak gelir, bu yüzden JSON'a dönüştürülmeli
-            wazuh_alert = json.loads(wazuh_alert_json)
+            # Eğer boş bir string gelirse, varsayılan {} değeri ilə işləyəcək
+            if wazuh_alert_json:
+                wazuh_alert = json.loads(wazuh_alert_json)
+            else:
+                self.logger.warning("Received empty wazuh_alert_json string. Processing with an empty alert.")
+                wazuh_alert = {} # Boş bir sözlük olaraq qəbul et
+
         except json.JSONDecodeError as e:
             self.logger.critical(f"Failed to parse Wazuh alert JSON. Please ensure it's valid JSON. Details: {e}", exc_info=True)
             # Hata durumunda boş veya hata içeren bir çıktı döndür
-            return json.dumps({"error": f"Invalid JSON input: {e}"})
+            return json.dumps({"status": "failed", "error": f"Invalid JSON input: {e}", "original_input": wazuh_alert_json})
 
         # OpenCTI istemcisini başlat
         try:
             self._initialize_opencti_client(opencti_url, opencti_token)
         except Exception as e: # Burada daha spesifik hata yakalamak daha iyi
-            return json.dumps({"error": f"OpenCTI client initialization failed: {e}"})
+            return json.dumps({"status": "failed", "error": f"OpenCTI client initialization failed: {e}", "original_alert": wazuh_alert})
 
         # Wazuh alert içeriğini yönetin (top-level wrapping)
         wazuh_alert_content = wazuh_alert
@@ -223,9 +248,10 @@ class WazuhOpenCTIEnricherApp(AppBase):
         self.logger.info("\n=== Indicator Extraction Phase ===")
         extracted_indicators = self._extract_indicators_from_wazuh_alert(wazuh_alert_content)
 
-        # Eğer _extract_indicators_from_wazuh_alert hata objesi döndürürse, burada kontrol et
-        if isinstance(extracted_indicators, dict) and "error" in extracted_indicators:
-            return json.dumps(extracted_indicators)
+        # _extract_indicators_from_wazuh_alert funksiyası artıq error obyekti qaytarmır,
+        # boş bir sözlük qaytarır, bu hissə artıq lazım deyil.
+        # if isinstance(extracted_indicators, dict) and "error" in extracted_indicators:
+        #    return json.dumps(extracted_indicators)
 
         self.logger.info(f"Extracted {len(extracted_indicators['ips'])} unique IP(s).")
         for ip in extracted_indicators['ips']:
@@ -245,37 +271,32 @@ class WazuhOpenCTIEnricherApp(AppBase):
         # İşlem extracted IP adresleri
         for ip in extracted_indicators.get('ips', []):
             enriched_data = self._enrich_observable_from_opencti("IPv4-Addr", ip)
-            # Eğer enriched_data bir hata objesi ise, onu da listeye ekleyebiliriz veya atlayabiliriz
-            if enriched_data and "error" in enriched_data:
-                self.logger.warning(f"IP {ip} için zenginleştirme hatası: {enriched_data['error']}")
-                enriched_observables_list.append({"observable": ip, "type": "IPv4-Addr", "status": "failed", "error": enriched_data['error']})
-            elif enriched_data:
-                enriched_observables_list.append(enriched_data)
+            # Hər zaman bir sözlük qaytarıldığı üçün sadəcə listə əlavə edin
+            enriched_observables_list.append(enriched_data)
 
         # İşlem extracted Dosya Adları
         for file_name_val in extracted_indicators.get('file_names', []):
             enriched_data = self._enrich_observable_from_opencti("File.name", file_name_val)
-            if enriched_data and "error" in enriched_data:
-                self.logger.warning(f"Dosya adı {file_name_val} için zenginleştirme hatası: {enriched_data['error']}")
-                enriched_observables_list.append({"observable": file_name_val, "type": "File.name", "status": "failed", "error": enriched_data['error']})
-            elif enriched_data:
-                enriched_observables_list.append(enriched_data)
+            enriched_observables_list.append(enriched_data)
 
         # İşlem extracted MD5 Hash'leri
         for md5_hash_val in extracted_indicators.get('md5_hashes', []):
             enriched_data = self._enrich_observable_from_opencti("File.hashes.MD5", md5_hash_val)
-            if enriched_data and "error" in enriched_data:
-                self.logger.warning(f"MD5 hash {md5_hash_val} için zenginleştirme hatası: {enriched_data['error']}")
-                enriched_observables_list.append({"observable": md5_hash_val, "type": "File.hashes.MD5", "status": "failed", "error": enriched_data['error']})
-            elif enriched_data:
-                enriched_observables_list.append(enriched_data)
+            enriched_observables_list.append(enriched_data)
 
         self.logger.info(f"\nTotal {len(enriched_observables_list)} observables enriched from OpenCTI.")
         self.logger.info("=== Generating Final JSON Output ===")
 
         # Nihai JSON çıktısını hazırla
         final_output = {
+            "status": "success",
+            "message": "Wazuh alert enrichment completed.",
             "original_alert": wazuh_alert,
+            "extracted_indicators_summary": {
+                "ips_count": len(extracted_indicators['ips']),
+                "file_names_count": len(extracted_indicators['file_names']),
+                "md5_hashes_count": len(extracted_indicators['md5_hashes']),
+            },
             "enriched_observables": enriched_observables_list
         }
 
