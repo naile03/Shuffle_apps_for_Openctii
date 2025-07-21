@@ -1,9 +1,8 @@
 walkoff_version: 1.0.0
 app_version: 1.0.1
-name: Enricher_Wazuh_to_OpenCTI_V2
+name: Naila_APP_V2
 environment: Shuffle
 description: Enrich Wazuh alerts with OpenCTI information (v2)
-docker_image: nailamacidova/wazuh_opencti_enricher:latest
 author: Naila
 tags:
   - wazuh
